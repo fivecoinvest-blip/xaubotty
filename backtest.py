@@ -11,7 +11,7 @@ import bot
 
 print("=" * 70)
 print("  XAUBOTTY QUANTITATIVE BACKTESTING ENGINE")
-print("  Symbol: XAU/USD (Vantage) | 10,000 Consecutive 5M Candles (~1.7 Months)")
+print("  Symbol: XAU/USD (Vantage) | 35,000 Consecutive 5M Candles (~6 Months)")
 print("=" * 70)
 
 # 1. Ingest Data from MT5
@@ -19,11 +19,11 @@ if not mt5.initialize():
     print(f"❌ Failed to connect to MetaTrader 5: {mt5.last_error()}")
     sys.exit(1)
 
-CANDLE_COUNT = 10000
+CANDLE_COUNT = 35000
 print(f"📥 Pulling {CANDLE_COUNT} 5-minute and 15-minute candles from MetaTrader 5...")
 
 r5 = mt5.copy_rates_from_pos("XAUUSD", mt5.TIMEFRAME_M5, 0, CANDLE_COUNT)
-r15 = mt5.copy_rates_from_pos("XAUUSD", mt5.TIMEFRAME_M15, 0, CANDLE_COUNT // 3 + 100)
+r15 = mt5.copy_rates_from_pos("XAUUSD", mt5.TIMEFRAME_M15, 0, CANDLE_COUNT // 3 + 200)
 mt5.shutdown()
 
 if r5 is None or len(r5) < 500:
@@ -69,10 +69,11 @@ FIXED_LOT = 0.01
 SPREAD_COST = 0.30 # $0.30 Vantage spread cost per 0.01 lot
 
 class AccountSim:
-    def __init__(self, name, max_daily=3, is_unlimited=False):
+    def __init__(self, name, max_daily=3, is_unlimited=False, compound=False):
         self.name = name
         self.max_daily = max_daily
         self.is_unlimited = is_unlimited
+        self.compound = compound
         self.balance = INITIAL_BALANCE
         self.peak_balance = INITIAL_BALANCE
         self.max_drawdown_usd = 0.0
@@ -93,7 +94,9 @@ class AccountSim:
 
     def record_trade(self, pnl, score, direction, entry, exit_p, duration_mins):
         self.trades_today += 1
-        net_pnl = pnl - SPREAD_COST
+        lot = bot.calculate_lot_size(self.balance, INITIAL_BALANCE) if self.compound else FIXED_LOT
+        mult = lot / 0.01
+        net_pnl = round((pnl * mult) - (SPREAD_COST * mult), 2)
         self.balance += net_pnl
         if self.balance > self.peak_balance:
             self.peak_balance = self.balance
@@ -105,8 +108,9 @@ class AccountSim:
             self.max_drawdown_pct = dd_pct
 
         self.trades.append({
+            "lot": lot,
             "pnl": round(net_pnl, 2),
-            "gross_pnl": round(pnl, 2),
+            "gross_pnl": round(pnl * mult, 2),
             "score": score,
             "direction": direction,
             "entry": entry,
@@ -115,9 +119,9 @@ class AccountSim:
             "balance_after": round(self.balance, 2)
         })
 
-acc_a = AccountSim("Setup A (Institutional 1:2 R:R - Max 3/day)", max_daily=3)
-acc_b = AccountSim("Setup B (Sniper Precision 1:1.5 R:R - Max 3/day)", max_daily=3)
-acc_c = AccountSim("Setup C (Unlimited SMC 1:2 - No Daily Limit)", is_unlimited=True)
+acc_a = AccountSim("Setup A (Institutional 1:2 R:R - Compounding)", max_daily=3, compound=True)
+acc_b = AccountSim("Setup B (Sniper Precision 1:1.5 R:R - Compounding)", max_daily=3, compound=True)
+acc_c = AccountSim("Setup C (Fixed 0.01 Micro Lot Benchmark)", is_unlimited=True, compound=False)
 
 # 2. Walk-Forward Simulation Loop
 LOOKBACK = 100
@@ -145,6 +149,12 @@ while i < total_bars - 20:
     window_15m = [c for c in candles_15m if c["timestamp"] <= curr_time][-LOOKBACK:]
 
     if len(window_15m) < 30:
+        i += 1
+        continue
+
+    # Skip signals during US Macro News Blackout (20:00 - 22:00 PHT)
+    curr_dt_pht = datetime.fromtimestamp(curr_time, tz=bot.PHT)
+    if bot.is_news_blackout(curr_dt_pht):
         i += 1
         continue
 

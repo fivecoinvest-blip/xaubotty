@@ -50,6 +50,24 @@ PAPER_MODE = True                   # Strictly Paper Mode Only!
 # Gold contract on Vantage: 1.00 lot = 100oz -> $1 move = $100/lot -> $1 move = $1.00 per 0.01 lot
 USD_PER_DOLLAR_MOVE_PER_001_LOT = 1.0
 
+# US High-Impact Macro Economic News Blackout (20:00 - 22:00 PHT)
+# Shields against violent 8:30 PM PHT data releases (CPI, PPI, NFP, Retail Sales, FOMC)
+NEWS_BLACKOUT_START_HOUR = 20
+NEWS_BLACKOUT_END_HOUR   = 22
+
+def is_news_blackout(dt=None):
+    """Returns True if current time falls within US High-Impact Macro News Window (20:00 - 22:00 PHT Monday-Friday)."""
+    if dt is None:
+        dt = datetime.now(PHT)
+    if dt.weekday() < 5 and NEWS_BLACKOUT_START_HOUR <= dt.hour < NEWS_BLACKOUT_END_HOUR:
+        return True
+    return False
+
+def calculate_lot_size(balance, base_capital=CAPITAL):
+    """Dynamic compounding: scales 0.01 lot per $40 of balance, stepping down on drawdowns."""
+    lot_units = max(1, int(balance // base_capital))
+    return round(lot_units * 0.01, 2)
+
 # ============================================
 # PERSISTENT LOCAL LEDGER (CRASH-PROOF & RESTART-SAFE)
 # ============================================
@@ -282,6 +300,8 @@ def send_status_summary():
 
     bid_str = f"{market_info['bid']:.2f}" if market_info["bid"] is not None else "N/A"
     ask_str = f"{market_info['ask']:.2f}" if market_info["ask"] is not None else "N/A"
+    now_dt = datetime.now(PHT)
+    news_status = "🛡️ Active Blackout (20:00 - 22:00 PHT)" if is_news_blackout(now_dt) else "🟢 Clear (No News Blackout)"
 
     msg = f"""⚡ <b>XAUBOTTY SYSTEM STATUS</b>
 ━━━━━━━━━━━━━━━━━━━━
@@ -290,14 +310,15 @@ def send_status_summary():
 💰 <b>Current Price:</b> {bid_str} / {ask_str}
 🕒 <b>Time:</b> {now_pht}
 🌏 <b>Session:</b> {get_session()}
+🛡️ <b>US News Filter:</b> {news_status}
 💼 <b>Fund / Leverage:</b> ${CAPITAL:.2f} | 1:{LEVERAGE}
-📦 <b>Micro Lot:</b> {FIXED_LOT}
+📦 <b>Base Micro Lot:</b> {FIXED_LOT} (Dynamic Compounding Active)
 📂 <b>Active Paper Trades:</b> {len(open_trades)}
 ━━━━━━━━━━━━━━━━━━━━
-📊 <b>Today's Trades:</b>
-  • Setup A: {accounts.get('setup_a', {}).get('trades_today', 0)}/3
-  • Setup B: {accounts.get('setup_b', {}).get('trades_today', 0)}/3
-  • Setup C: {accounts.get('setup_c', {}).get('trades_today', 0)} (Unlimited)"""
+📊 <b>Today's Trades & Sizing:</b>
+  • Setup A: {accounts.get('setup_a', {}).get('trades_today', 0)}/3 | Lot: {calculate_lot_size(accounts.get('setup_a', {}).get('balance', 40.0))}
+  • Setup B: {accounts.get('setup_b', {}).get('trades_today', 0)}/3 | Lot: {calculate_lot_size(accounts.get('setup_b', {}).get('balance', 40.0))}
+  • Setup C: {accounts.get('setup_c', {}).get('trades_today', 0)} (Unlimited) | Lot: {FIXED_LOT}"""
     send_telegram(msg)
 
 
@@ -882,10 +903,14 @@ def send_signal(sig):
         acc_b["trades_today"] += 1
     acc_c["trades_today"] += 1
 
-    # Exact margin calculation for Vantage 1:500 on 0.01 micro lot
-    notional = sig["price"] * 100 * FIXED_LOT
-    req_margin = round(notional / LEVERAGE, 2)
-    free_margin = round(CAPITAL - req_margin, 2)
+    # Dynamic compounding lot sizing
+    lot_a = calculate_lot_size(acc_a["balance"], CAPITAL)
+    lot_b = calculate_lot_size(acc_b["balance"], CAPITAL)
+    lot_c = FIXED_LOT # 0.01 fixed micro lot benchmark
+
+    req_margin_a = round((sig["price"] * 100 * lot_a) / LEVERAGE, 2)
+    req_margin_b = round((sig["price"] * 100 * lot_b) / LEVERAGE, 2)
+    req_margin_c = round((sig["price"] * 100 * lot_c) / LEVERAGE, 2)
 
     sa = sig["setup_a"]
     sb = sig["setup_b"]
@@ -903,28 +928,29 @@ def send_signal(sig):
 ━━━━━━━━━━━━━━━━━━━━
 📊 <b>Direction:</b> {direction}
 💰 <b>Market Entry:</b> {sig["price"]:.2f}
-📦 <b>Volume:</b> {sig["lots"]} Micro Lot (Fixed)
 {feed_badge}
 🇵🇭 <b>Time:</b> {now_pht}
 🌏 <b>Session:</b> {session}
-💼 <b>Account:</b> ${CAPITAL:.2f} Starting Fund | 1:{LEVERAGE} Leverage
-🔒 <b>Margin Used:</b> ${req_margin:.2f} | <b>Free Margin:</b> ${free_margin:.2f}
+🛡️ <b>News Filter:</b> 🟢 Pass (Outside 20:00-22:00 PHT Blackout)
 ━━━━━━━━━━━━━━━━━━━━
 📊 <b>3 ACCOUNT EXECUTION COMPARISON:</b>
 
 🔹 <b>[SETUP A] INSTITUTIONAL SMC (1:2 R:R)</b>
-🛑 <b>Stop Loss:</b> {sa["sl_price"]:.2f} (-${sa["max_risk_usd"]:.2f})
-🎯 <b>Take Profit:</b> {sa["tp_price"]:.2f} (+${sa["target_win_usd"]:.2f})
+📦 <b>Volume:</b> {lot_a} Lot (Compounding) | <b>Margin:</b> ${req_margin_a:.2f}
+🛑 <b>Stop Loss:</b> {sa["sl_price"]:.2f} (-${sa["max_risk_usd"]*(lot_a/0.01):.2f})
+🎯 <b>Take Profit:</b> {sa["tp_price"]:.2f} (+${sa["target_win_usd"]*(lot_a/0.01):.2f})
 ⚖️ <b>R:R:</b> {sa["rr"]} | <b>Status:</b> {status_a}
 💰 <b>Balance:</b> ${acc_a['balance']:.2f}
 
 🔸 <b>[SETUP B] SNIPER PRECISION (1:1.5 R:R)</b>
-🛑 <b>Stop Loss:</b> {sb["sl_price"]:.2f} (-${sb["max_risk_usd"]:.2f})
-🎯 <b>Take Profit:</b> {sb["tp_price"]:.2f} (+${sb["target_win_usd"]:.2f})
+📦 <b>Volume:</b> {lot_b} Lot (Compounding) | <b>Margin:</b> ${req_margin_b:.2f}
+🛑 <b>Stop Loss:</b> {sb["sl_price"]:.2f} (-${sb["max_risk_usd"]*(lot_b/0.01):.2f})
+🎯 <b>Take Profit:</b> {sb["tp_price"]:.2f} (+${sb["target_win_usd"]*(lot_b/0.01):.2f})
 ⚖️ <b>R:R:</b> {sb["rr"]} | <b>Status:</b> {status_b}
 💰 <b>Balance:</b> ${acc_b['balance']:.2f}
 
 ⚡ <b>[SETUP C] UNLIMITED SMC (NO DAILY LIMIT)</b>
+📦 <b>Volume:</b> {lot_c} Micro Lot (Fixed) | <b>Margin:</b> ${req_margin_c:.2f}
 🛑 <b>Stop Loss:</b> {sc["sl_price"]:.2f} (-${sc["max_risk_usd"]:.2f})
 🎯 <b>Take Profit:</b> {sc["tp_price"]:.2f} (+${sc["target_win_usd"]:.2f})
 ⚖️ <b>R:R:</b> {sc["rr"]} | <b>Status:</b> {status_c}
@@ -941,7 +967,7 @@ def send_signal(sig):
 💾 <i>Persisted to local ledger: projects/xaubotty/data/ledger.json</i>"""
 
     send_telegram(msg)
-    print(f"✅ Dispatched Signal: {sig['signal']} @ {sig['price']:.2f} | Setup A: {status_a} | Setup B: {status_b} | Setup C: {status_c}")
+    print(f"✅ Dispatched Signal: {sig['signal']} @ {sig['price']:.2f} | Setup A: {status_a} ({lot_a} lot) | Setup B: {status_b} ({lot_b} lot) | Setup C: {status_c} ({lot_c} lot)")
 
     # Register open paper trade for live tracking in persistent ledger
     paper_trade = {
@@ -953,6 +979,7 @@ def send_signal(sig):
         "spread": market_info["spread"],
         "setup_a": {
             "active": can_take_a,
+            "lot": lot_a,
             "sl": sa["sl_price"],
             "tp": sa["tp_price"],
             "status": "OPEN" if can_take_a else "SKIPPED_LIMIT_REACHED",
@@ -960,6 +987,7 @@ def send_signal(sig):
         },
         "setup_b": {
             "active": can_take_b,
+            "lot": lot_b,
             "sl": sb["sl_price"],
             "tp": sb["tp_price"],
             "status": "OPEN" if can_take_b else "SKIPPED_LIMIT_REACHED",
@@ -967,6 +995,7 @@ def send_signal(sig):
         },
         "setup_c": {
             "active": True,
+            "lot": lot_c,
             "sl": sc["sl_price"],
             "tp": sc["tp_price"],
             "status": "OPEN",
@@ -997,24 +1026,25 @@ def evaluate_open_paper_trades(current_candle):
 
         # 1. Setup A
         sa = trade["setup_a"]
+        mult_a = sa.get("lot", 0.01) / 0.01
         if sa["active"] and sa["status"] == "OPEN":
             if trade["signal"] == "LONG":
                 if high >= sa["tp"]:
                     sa["status"] = "TAKE_PROFIT_HIT"
-                    sa["pnl"] = round(sa["tp"] - trade["entry"], 2)
+                    sa["pnl"] = round((sa["tp"] - trade["entry"]) * mult_a, 2)
                     trade_resolved = True
                 elif low <= sa["sl"]:
                     sa["status"] = "STOP_LOSS_HIT"
-                    sa["pnl"] = -round(trade["entry"] - sa["sl"], 2)
+                    sa["pnl"] = -round((trade["entry"] - sa["sl"]) * mult_a, 2)
                     trade_resolved = True
             else: # SHORT
                 if low <= sa["tp"]:
                     sa["status"] = "TAKE_PROFIT_HIT"
-                    sa["pnl"] = round(trade["entry"] - sa["tp"], 2)
+                    sa["pnl"] = round((trade["entry"] - sa["tp"]) * mult_a, 2)
                     trade_resolved = True
                 elif high >= sa["sl"]:
                     sa["status"] = "STOP_LOSS_HIT"
-                    sa["pnl"] = -round(sa["sl"] - trade["entry"], 2)
+                    sa["pnl"] = -round((sa["sl"] - trade["entry"]) * mult_a, 2)
                     trade_resolved = True
 
             if sa["status"] != "OPEN":
@@ -1027,24 +1057,25 @@ def evaluate_open_paper_trades(current_candle):
 
         # 2. Setup B (Sniper Precision 1:1.5 R:R)
         sb = trade["setup_b"]
+        mult_b = sb.get("lot", 0.01) / 0.01
         if sb["active"] and sb["status"] == "OPEN":
             if trade["signal"] == "LONG":
                 if high >= sb["tp"]:
                     sb["status"] = "TAKE_PROFIT_HIT"
-                    sb["pnl"] = round(sb["tp"] - trade["entry"], 2)
+                    sb["pnl"] = round((sb["tp"] - trade["entry"]) * mult_b, 2)
                     trade_resolved = True
                 elif low <= sb["sl"]:
                     sb["status"] = "STOP_LOSS_HIT"
-                    sb["pnl"] = -round(trade["entry"] - sb["sl"], 2)
+                    sb["pnl"] = -round((trade["entry"] - sb["sl"]) * mult_b, 2)
                     trade_resolved = True
             else: # SHORT
                 if low <= sb["tp"]:
                     sb["status"] = "TAKE_PROFIT_HIT"
-                    sb["pnl"] = round(trade["entry"] - sb["tp"], 2)
+                    sb["pnl"] = round((trade["entry"] - sb["tp"]) * mult_b, 2)
                     trade_resolved = True
                 elif high >= sb["sl"]:
                     sb["status"] = "STOP_LOSS_HIT"
-                    sb["pnl"] = -round(sb["sl"] - trade["entry"], 2)
+                    sb["pnl"] = -round((sb["sl"] - trade["entry"]) * mult_b, 2)
                     trade_resolved = True
 
             if sb["status"] != "OPEN":
@@ -1057,24 +1088,25 @@ def evaluate_open_paper_trades(current_candle):
 
         # 3. Setup C (Unlimited)
         sc = trade["setup_c"]
+        mult_c = sc.get("lot", 0.01) / 0.01
         if sc["active"] and sc["status"] == "OPEN":
             if trade["signal"] == "LONG":
                 if high >= sc["tp"]:
                     sc["status"] = "TAKE_PROFIT_HIT"
-                    sc["pnl"] = round(sc["tp"] - trade["entry"], 2)
+                    sc["pnl"] = round((sc["tp"] - trade["entry"]) * mult_c, 2)
                     trade_resolved = True
                 elif low <= sc["sl"]:
                     sc["status"] = "STOP_LOSS_HIT"
-                    sc["pnl"] = -round(trade["entry"] - sc["sl"], 2)
+                    sc["pnl"] = -round((trade["entry"] - sc["sl"]) * mult_c, 2)
                     trade_resolved = True
             else: # SHORT
                 if low <= sc["tp"]:
                     sc["status"] = "TAKE_PROFIT_HIT"
-                    sc["pnl"] = round(trade["entry"] - sc["tp"], 2)
+                    sc["pnl"] = round((trade["entry"] - sc["tp"]) * mult_c, 2)
                     trade_resolved = True
                 elif high >= sc["sl"]:
                     sc["status"] = "STOP_LOSS_HIT"
-                    sc["pnl"] = -round(sc["sl"] - trade["entry"], 2)
+                    sc["pnl"] = -round((sc["sl"] - trade["entry"]) * mult_c, 2)
                     trade_resolved = True
 
             if sc["status"] != "OPEN":
@@ -1232,20 +1264,24 @@ def main():
             # Check open paper trades from persistent ledger against the latest candle
             evaluate_open_paper_trades(candles_5m[-1])
 
-            # Generate new signal
-            sig = generate_signal(candles_5m, candles_15m)
-
-            if sig:
-                now_ts = time.time()
-                if (last_signal_direction == sig["signal"] and
-                        now_ts - last_signal_time < 2700):
-                    print("Same direction within 45min — skipping repeat entry.")
-                else:
-                    send_signal(sig)
-                    last_signal_direction = sig["signal"]
-                    last_signal_time      = now_ts
+            # Check US High-Impact Macro Economic News Blackout (20:00 - 22:00 PHT)
+            if is_news_blackout(now):
+                print(f"🛡️ [NEWS BLACKOUT ACTIVE] {now.strftime('%I:%M %p PHT')}: US Macro Window (20:00-22:00 PHT). New entries paused.")
             else:
-                print("No signal on this candle. Waiting for next close...")
+                # Generate new signal
+                sig = generate_signal(candles_5m, candles_15m)
+
+                if sig:
+                    now_ts = time.time()
+                    if (last_signal_direction == sig["signal"] and
+                            now_ts - last_signal_time < 2700):
+                        print("Same direction within 45min — skipping repeat entry.")
+                    else:
+                        send_signal(sig)
+                        last_signal_direction = sig["signal"]
+                        last_signal_time      = now_ts
+                else:
+                    print("No signal on this candle. Waiting for next close...")
 
             # Clock-sync: sleep until next 5M candle close while responding to Telegram commands
             ts         = time.time()
