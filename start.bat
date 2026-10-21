@@ -7,3 +7,4 @@ echo   Connected to TwelveData & Telegram
 echo ===================================================
 .venv\Scripts\python.exe bot.py
 pause
+
