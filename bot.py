@@ -54,32 +54,107 @@ PAPER_MODE = True                   # Strictly Paper Mode Only!
 USD_PER_DOLLAR_MOVE_PER_001_LOT = 1.0
 
 # ============================================
-# STATE & PAPER TRADE LEDGER
+# PERSISTENT LOCAL LEDGER (CRASH-PROOF & RESTART-SAFE)
 # ============================================
-trades_today          = 0
-last_trade_date       = None
+DATA_DIR    = os.path.join(os.path.dirname(__file__), "data")
+LEDGER_FILE = os.path.join(DATA_DIR, "ledger.json")
+
+DEFAULT_LEDGER = {
+    "accounts": {
+        "setup_a": {
+            "name": "Disciplined Institutional (1:2 R:R)",
+            "badge": "🔹 Setup A",
+            "rule": "Disciplined (Max 3/day)",
+            "initial_balance": CAPITAL,
+            "balance": CAPITAL,
+            "total_pnl": 0.0,
+            "wins": 0,
+            "losses": 0,
+            "trades_today": 0,
+            "last_trade_date": None
+        },
+        "setup_b": {
+            "name": "Disciplined Quick Scalp ($10 SL / $3 TP)",
+            "badge": "🔸 Setup B",
+            "rule": "Disciplined (Max 3/day)",
+            "initial_balance": CAPITAL,
+            "balance": CAPITAL,
+            "total_pnl": 0.0,
+            "wins": 0,
+            "losses": 0,
+            "trades_today": 0,
+            "last_trade_date": None
+        },
+        "setup_c": {
+            "name": "Unlimited High-Frequency SMC",
+            "badge": "⚡ Setup C",
+            "rule": "UNLIMITED (No Daily Limit)",
+            "initial_balance": CAPITAL,
+            "balance": CAPITAL,
+            "total_pnl": 0.0,
+            "wins": 0,
+            "losses": 0,
+            "trades_today": 0,
+            "last_trade_date": None
+        }
+    },
+    "open_trades": [],
+    "closed_trades": []
+}
+
+
+def load_ledger():
+    """Loads ledger from disk, auto-initializing fresh accounts if not present."""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    if os.path.exists(LEDGER_FILE):
+        try:
+            with open(LEDGER_FILE, "r") as f:
+                data = json.load(f)
+                if "accounts" not in data:
+                    data["accounts"] = {}
+                for k, v in DEFAULT_LEDGER["accounts"].items():
+                    if k not in data["accounts"]:
+                        data["accounts"][k] = v.copy()
+                if "open_trades" not in data:
+                    data["open_trades"] = []
+                if "closed_trades" not in data:
+                    data["closed_trades"] = []
+                return data
+        except Exception as e:
+            print(f"Error loading ledger: {e}")
+    # Return fresh ledger
+    import copy
+    fresh = copy.deepcopy(DEFAULT_LEDGER)
+    save_ledger(fresh)
+    return fresh
+
+
+def save_ledger(data):
+    """Atomically writes ledger to disk to prevent corruptions during power-cuts or restarts."""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    try:
+        tmp_file = LEDGER_FILE + ".tmp"
+        with open(tmp_file, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp_file, LEDGER_FILE)
+    except Exception as e:
+        print(f"Error saving ledger: {e}")
+
+
+def check_daily_reset(ledger, current_date_str):
+    """Resets daily trade counters for each account when a new calendar day arrives in Philippines."""
+    updated = False
+    for acc in ledger["accounts"].values():
+        if acc.get("last_trade_date") != current_date_str:
+            acc["trades_today"] = 0
+            acc["last_trade_date"] = current_date_str
+            updated = True
+    if updated:
+        save_ledger(ledger)
+
+
 last_signal_direction = None
 last_signal_time      = 0
-active_paper_trades   = []
-PAPER_HISTORY_FILE    = os.path.join(os.path.dirname(__file__), "paper_trades_history.json")
-
-
-def load_paper_history():
-    if os.path.exists(PAPER_HISTORY_FILE):
-        try:
-            with open(PAPER_HISTORY_FILE, "r") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
-
-
-def save_paper_history(history):
-    try:
-        with open(PAPER_HISTORY_FILE, "w") as f:
-            json.dump(history, f, indent=2)
-    except Exception as e:
-        print(f"Error saving paper history: {e}")
 
 # ============================================
 # TELEGRAM
@@ -658,11 +733,23 @@ def generate_signal(candles_5m, candles_15m):
             "be_winrate": "76.9%",
             "max_risk_usd": sl_dollars_b,
             "target_win_usd": tp_dollars_b,
+        },
+        # Profile C (Unlimited High-Frequency SMC)
+        "setup_c": {
+            "name": "Unlimited High-Frequency SMC",
+            "sl_dollars": sl_dollars_a,
+            "tp_dollars": tp_dollars_a,
+            "sl_price": sl_price_a,
+            "tp_price": tp_price_a,
+            "rr": "1:2.0",
+            "be_winrate": "33.3%",
+            "max_risk_usd": sl_dollars_a,
+            "target_win_usd": tp_dollars_a,
         }
     }
 
 # ============================================
-# FORMAT & DISPATCH DUAL PAPER SIGNAL
+# FORMAT & DISPATCH TRIPLE PAPER SIGNAL
 # ============================================
 def send_signal(sig):
     direction = "🟢 LONG (BUY)" if sig["signal"] == "LONG" else "🔴 SHORT (SELL)"
@@ -670,7 +757,26 @@ def send_signal(sig):
 
     reasons_text = "\n".join([f"  ✅ {r}" for r in sig["reasons"]])
     now_pht      = datetime.now(PHT).strftime('%d %b %Y %I:%M %p PHT')
+    today_str    = datetime.now(PHT).strftime('%Y-%m-%d')
     session      = get_session()
+
+    # Load persistent ledger & update daily limits
+    ledger = load_ledger()
+    check_daily_reset(ledger, today_str)
+
+    acc_a = ledger["accounts"]["setup_a"]
+    acc_b = ledger["accounts"]["setup_b"]
+    acc_c = ledger["accounts"]["setup_c"]
+
+    can_take_a = acc_a["trades_today"] < MAX_TRADES_PER_DAY
+    can_take_b = acc_b["trades_today"] < MAX_TRADES_PER_DAY
+    can_take_c = True # Always unlimited!
+
+    if can_take_a:
+        acc_a["trades_today"] += 1
+    if can_take_b:
+        acc_b["trades_today"] += 1
+    acc_c["trades_today"] += 1
 
     # Exact margin calculation for Vantage 1:500 on 0.01 micro lot
     notional = sig["price"] * 100 * FIXED_LOT
@@ -679,12 +785,17 @@ def send_signal(sig):
 
     sa = sig["setup_a"]
     sb = sig["setup_b"]
+    sc = sig["setup_c"]
 
     market_info = get_live_market_info()
     spread_str  = f"${market_info['spread']:.2f} ({int(market_info['spread']*10)} pips)" if market_info["spread"] is not None else "N/A"
     feed_badge  = f"🏛️ <b>Data Feed:</b> {market_info['source']}\n📏 <b>Live Spread:</b> {spread_str}"
 
-    msg = f"""🧪 <b>XAUBOTTY DUAL-PAPER SIGNAL</b> {emoji}
+    status_a = f"✅ Active ({acc_a['trades_today']}/3 Today)" if can_take_a else "⏸️ Paused (3/3 Limit Reached)"
+    status_b = f"✅ Active ({acc_b['trades_today']}/3 Today)" if can_take_b else "⏸️ Paused (3/3 Limit Reached)"
+    status_c = f"⚡ Active ({acc_c['trades_today']} Trades Today — UNLIMITED)"
+
+    msg = f"""🧪 <b>XAUBOTTY TRIPLE-PAPER SIGNAL</b> {emoji}
 ━━━━━━━━━━━━━━━━━━━━
 📊 <b>Direction:</b> {direction}
 💰 <b>Market Entry:</b> {sig["price"]:.2f}
@@ -692,20 +803,28 @@ def send_signal(sig):
 {feed_badge}
 🇵🇭 <b>Time:</b> {now_pht}
 🌏 <b>Session:</b> {session}
-💼 <b>Account:</b> ${CAPITAL:.2f} Fund | 1:{LEVERAGE} Leverage
+💼 <b>Account:</b> ${CAPITAL:.2f} Starting Fund | 1:{LEVERAGE} Leverage
 🔒 <b>Margin Used:</b> ${req_margin:.2f} | <b>Free Margin:</b> ${free_margin:.2f}
 ━━━━━━━━━━━━━━━━━━━━
-📊 <b>DUAL PAPER COMPARISON MODES:</b>
+📊 <b>3 ACCOUNT EXECUTION COMPARISON:</b>
 
 🔹 <b>[SETUP A] INSTITUTIONAL SMC (1:2 R:R)</b>
 🛑 <b>Stop Loss:</b> {sa["sl_price"]:.2f} (-${sa["max_risk_usd"]:.2f})
 🎯 <b>Take Profit:</b> {sa["tp_price"]:.2f} (+${sa["target_win_usd"]:.2f})
-⚖️ <b>Risk/Reward:</b> {sa["rr"]} | <b>Needed Win Rate:</b> {sa["be_winrate"]}
+⚖️ <b>R:R:</b> {sa["rr"]} | <b>Status:</b> {status_a}
+💰 <b>Balance:</b> ${acc_a['balance']:.2f}
 
 🔸 <b>[SETUP B] QUICK SCALP TEST ($10 SL / $3 TP)</b>
 🛑 <b>Stop Loss:</b> {sb["sl_price"]:.2f} (-${sb["max_risk_usd"]:.2f})
 🎯 <b>Take Profit:</b> {sb["tp_price"]:.2f} (+${sb["target_win_usd"]:.2f})
-⚖️ <b>Risk/Reward:</b> {sb["rr"]} | <b>Needed Win Rate:</b> {sb["be_winrate"]}
+⚖️ <b>R:R:</b> {sb["rr"]} | <b>Status:</b> {status_b}
+💰 <b>Balance:</b> ${acc_b['balance']:.2f}
+
+⚡ <b>[SETUP C] UNLIMITED SMC (NO DAILY LIMIT)</b>
+🛑 <b>Stop Loss:</b> {sc["sl_price"]:.2f} (-${sc["max_risk_usd"]:.2f})
+🎯 <b>Take Profit:</b> {sc["tp_price"]:.2f} (+${sc["target_win_usd"]:.2f})
+⚖️ <b>R:R:</b> {sc["rr"]} | <b>Status:</b> {status_c}
+💰 <b>Balance:</b> ${acc_c['balance']:.2f}
 ━━━━━━━━━━━━━━━━━━━━
 📋 <b>SMC CONFLUENCE (Score: {sig['confidence']}%):</b>
 {reasons_text}
@@ -715,100 +834,198 @@ def send_signal(sig):
 🕯 <b>Pattern:</b> {sig["pattern"]}
 📉 <b>RSI:</b> {sig["rsi"]}
 ━━━━━━━━━━━━━━━━━━━━
-⚠️ <i>Paper Mode Active. Tracking real outcomes for Setup A vs Setup B.</i>"""
+💾 <i>Persisted to local ledger: projects/xaubotty/data/ledger.json</i>"""
 
     send_telegram(msg)
-    print(f"✅ Dispatched Dual Signal: {sig['signal']} @ {sig['price']:.2f} | Setup A SL: {sa['sl_price']} TP: {sa['tp_price']} | Setup B SL: {sb['sl_price']} TP: {sb['tp_price']}")
+    print(f"✅ Dispatched Signal: {sig['signal']} @ {sig['price']:.2f} | Setup A: {status_a} | Setup B: {status_b} | Setup C: {status_c}")
 
-    # Register open paper trade for live tracking
+    # Register open paper trade for live tracking in persistent ledger
     paper_trade = {
-        "id": int(time.time()),
+        "id": f"trade_{int(time.time())}",
         "time_pht": now_pht,
         "signal": sig["signal"],
         "entry": sig["price"],
+        "feed": market_info["source"],
+        "spread": market_info["spread"],
         "setup_a": {
+            "active": can_take_a,
             "sl": sa["sl_price"],
             "tp": sa["tp_price"],
-            "status": "OPEN",
+            "status": "OPEN" if can_take_a else "SKIPPED_LIMIT_REACHED",
             "pnl": 0.0
         },
         "setup_b": {
+            "active": can_take_b,
             "sl": sb["sl_price"],
             "tp": sb["tp_price"],
+            "status": "OPEN" if can_take_b else "SKIPPED_LIMIT_REACHED",
+            "pnl": 0.0
+        },
+        "setup_c": {
+            "active": True,
+            "sl": sc["sl_price"],
+            "tp": sc["tp_price"],
             "status": "OPEN",
             "pnl": 0.0
         }
     }
-    active_paper_trades.append(paper_trade)
+    ledger.setdefault("open_trades", []).append(paper_trade)
+    save_ledger(ledger)
 
 
 def evaluate_open_paper_trades(current_candle):
-    """Monitors active paper trades and sends resolution alerts when SL or TP is touched."""
+    """Monitors active paper trades from the persistent ledger and records outcomes when SL or TP is touched."""
+    ledger = load_ledger()
+    open_trades = ledger.get("open_trades", [])
+    if not open_trades:
+        return
+
     high = current_candle["high"]
     low  = current_candle["low"]
     time_str = current_candle["time"]
 
+    accounts = ledger["accounts"]
     resolved_any = False
-    for trade in active_paper_trades:
-        # Check Setup A
-        if trade["setup_a"]["status"] == "OPEN":
+    newly_resolved = []
+
+    for trade in open_trades:
+        trade_resolved = False
+
+        # 1. Setup A
+        sa = trade["setup_a"]
+        if sa["active"] and sa["status"] == "OPEN":
             if trade["signal"] == "LONG":
-                if high >= trade["setup_a"]["tp"]:
-                    trade["setup_a"]["status"] = "TAKE_PROFIT_HIT"
-                    trade["setup_a"]["pnl"] = round(trade["setup_a"]["tp"] - trade["entry"], 2)
-                    resolved_any = True
-                elif low <= trade["setup_a"]["sl"]:
-                    trade["setup_a"]["status"] = "STOP_LOSS_HIT"
-                    trade["setup_a"]["pnl"] = -round(trade["entry"] - trade["setup_a"]["sl"], 2)
-                    resolved_any = True
+                if high >= sa["tp"]:
+                    sa["status"] = "TAKE_PROFIT_HIT"
+                    sa["pnl"] = round(sa["tp"] - trade["entry"], 2)
+                    trade_resolved = True
+                elif low <= sa["sl"]:
+                    sa["status"] = "STOP_LOSS_HIT"
+                    sa["pnl"] = -round(trade["entry"] - sa["sl"], 2)
+                    trade_resolved = True
             else: # SHORT
-                if low <= trade["setup_a"]["tp"]:
-                    trade["setup_a"]["status"] = "TAKE_PROFIT_HIT"
-                    trade["setup_a"]["pnl"] = round(trade["entry"] - trade["setup_a"]["tp"], 2)
-                    resolved_any = True
-                elif high >= trade["setup_a"]["sl"]:
-                    trade["setup_a"]["status"] = "STOP_LOSS_HIT"
-                    trade["setup_a"]["pnl"] = -round(trade["setup_a"]["sl"] - trade["entry"], 2)
-                    resolved_any = True
+                if low <= sa["tp"]:
+                    sa["status"] = "TAKE_PROFIT_HIT"
+                    sa["pnl"] = round(trade["entry"] - sa["tp"], 2)
+                    trade_resolved = True
+                elif high >= sa["sl"]:
+                    sa["status"] = "STOP_LOSS_HIT"
+                    sa["pnl"] = -round(sa["sl"] - trade["entry"], 2)
+                    trade_resolved = True
 
-        # Check Setup B
-        if trade["setup_b"]["status"] == "OPEN":
+            if sa["status"] != "OPEN":
+                accounts["setup_a"]["balance"] += sa["pnl"]
+                accounts["setup_a"]["total_pnl"] += sa["pnl"]
+                if sa["pnl"] > 0:
+                    accounts["setup_a"]["wins"] += 1
+                else:
+                    accounts["setup_a"]["losses"] += 1
+
+        # 2. Setup B
+        sb = trade["setup_b"]
+        if sb["active"] and sb["status"] == "OPEN":
             if trade["signal"] == "LONG":
-                if high >= trade["setup_b"]["tp"]:
-                    trade["setup_b"]["status"] = "TAKE_PROFIT_HIT"
-                    trade["setup_b"]["pnl"] = 3.00
-                    resolved_any = True
-                elif low <= trade["setup_b"]["sl"]:
-                    trade["setup_b"]["status"] = "STOP_LOSS_HIT"
-                    trade["setup_b"]["pnl"] = -10.00
-                    resolved_any = True
+                if high >= sb["tp"]:
+                    sb["status"] = "TAKE_PROFIT_HIT"
+                    sb["pnl"] = 3.00
+                    trade_resolved = True
+                elif low <= sb["sl"]:
+                    sb["status"] = "STOP_LOSS_HIT"
+                    sb["pnl"] = -10.00
+                    trade_resolved = True
             else: # SHORT
-                if low <= trade["setup_b"]["tp"]:
-                    trade["setup_b"]["status"] = "TAKE_PROFIT_HIT"
-                    trade["setup_b"]["pnl"] = 3.00
-                    resolved_any = True
-                elif high >= trade["setup_b"]["sl"]:
-                    trade["setup_b"]["status"] = "STOP_LOSS_HIT"
-                    trade["setup_b"]["pnl"] = -10.00
-                    resolved_any = True
+                if low <= sb["tp"]:
+                    sb["status"] = "TAKE_PROFIT_HIT"
+                    sb["pnl"] = 3.00
+                    trade_resolved = True
+                elif high >= sb["sl"]:
+                    sb["status"] = "STOP_LOSS_HIT"
+                    sb["pnl"] = -10.00
+                    trade_resolved = True
 
-        if resolved_any:
-            msg = f"""🔔 <b>XAUBOTTY PAPER OUTCOME UPDATE</b>
-━━━━━━━━━━━━━━━━━━━━
-📊 <b>Signal:</b> {trade['signal']} from {trade['entry']:.2f}
-🕐 <b>Trigger Candle:</b> {time_str}
+            if sb["status"] != "OPEN":
+                accounts["setup_b"]["balance"] += sb["pnl"]
+                accounts["setup_b"]["total_pnl"] += sb["pnl"]
+                if sb["pnl"] > 0:
+                    accounts["setup_b"]["wins"] += 1
+                else:
+                    accounts["setup_b"]["losses"] += 1
 
-🔹 <b>[Setup A Institutional 1:2]:</b> {trade['setup_a']['status']} (P/L: ${trade['setup_a']['pnl']:+.2f})
-🔸 <b>[Setup B Quick Scalp]:</b> {trade['setup_b']['status']} (P/L: ${trade['setup_b']['pnl']:+.2f})
+        # 3. Setup C (Unlimited)
+        sc = trade["setup_c"]
+        if sc["active"] and sc["status"] == "OPEN":
+            if trade["signal"] == "LONG":
+                if high >= sc["tp"]:
+                    sc["status"] = "TAKE_PROFIT_HIT"
+                    sc["pnl"] = round(sc["tp"] - trade["entry"], 2)
+                    trade_resolved = True
+                elif low <= sc["sl"]:
+                    sc["status"] = "STOP_LOSS_HIT"
+                    sc["pnl"] = -round(trade["entry"] - sc["sl"], 2)
+                    trade_resolved = True
+            else: # SHORT
+                if low <= sc["tp"]:
+                    sc["status"] = "TAKE_PROFIT_HIT"
+                    sc["pnl"] = round(trade["entry"] - sc["tp"], 2)
+                    trade_resolved = True
+                elif high >= sc["sl"]:
+                    sc["status"] = "STOP_LOSS_HIT"
+                    sc["pnl"] = -round(sc["sl"] - trade["entry"], 2)
+                    trade_resolved = True
+
+            if sc["status"] != "OPEN":
+                accounts["setup_c"]["balance"] += sc["pnl"]
+                accounts["setup_c"]["total_pnl"] += sc["pnl"]
+                if sc["pnl"] > 0:
+                    accounts["setup_c"]["wins"] += 1
+                else:
+                    accounts["setup_c"]["losses"] += 1
+
+        if trade_resolved:
+            resolved_any = True
+            newly_resolved.append(trade)
+
+    if resolved_any:
+        still_open = []
+        for t in open_trades:
+            # Trade is fully done if all active setups are closed
+            all_done = True
+            for s_key in ["setup_a", "setup_b", "setup_c"]:
+                if t[s_key]["active"] and t[s_key]["status"] == "OPEN":
+                    all_done = False
+                    break
+            if all_done:
+                ledger.setdefault("closed_trades", []).append(t)
+            else:
+                still_open.append(t)
+
+        ledger["open_trades"] = still_open
+        save_ledger(ledger)
+
+        for trade in newly_resolved:
+            def fmt_stats(acc_key):
+                acc = accounts[acc_key]
+                tot = acc["wins"] + acc["losses"]
+                wr = round((acc["wins"] / tot * 100), 1) if tot > 0 else 0.0
+                return f"${acc['balance']:.2f} (P/L: ${acc['total_pnl']:+.2f}) | {wr}% WR ({acc['wins']}W - {acc['losses']}L)"
+
+            msg = f"""🔔 <b>XAUBOTTY PAPER OUTCOME RESOLUTION</b>
 ━━━━━━━━━━━━━━━━━━━━
-<i>Paper ledger updated in local memory.</i>"""
+📊 <b>Trade:</b> {trade['signal']} from {trade['entry']:.2f}
+🕐 <b>Candle:</b> {time_str}
+
+🔹 <b>[Setup A - Disciplined 3/day]:</b> {trade['setup_a']['status']} (P/L: ${trade['setup_a']['pnl']:+.2f})
+   💰 <b>Account:</b> {fmt_stats('setup_a')}
+
+🔸 <b>[Setup B - Quick Scalp 3/day]:</b> {trade['setup_b']['status']} (P/L: ${trade['setup_b']['pnl']:+.2f})
+   💰 <b>Account:</b> {fmt_stats('setup_b')}
+
+⚡ <b>[Setup C - Unlimited SMC]:</b> {trade['setup_c']['status']} (P/L: ${trade['setup_c']['pnl']:+.2f})
+   💰 <b>Account:</b> {fmt_stats('setup_c')}
+━━━━━━━━━━━━━━━━━━━━
+💾 <i>Persisted to local ledger: projects/xaubotty/data/ledger.json</i>"""
             send_telegram(msg)
-            history = load_paper_history()
-            history.append(trade)
-            save_paper_history(history)
-
-    # Keep only open trades
-    active_paper_trades[:] = [t for t in active_paper_trades if t["setup_a"]["status"] == "OPEN" or t["setup_b"]["status"] == "OPEN"]
+            print(f"🎯 Paper Outcome Recorded: Trade {trade['id']} resolved.")
 
 # ============================================
 # PHILIPPINES SESSION LABEL
@@ -830,54 +1047,69 @@ def get_session():
 # MAIN LOOP
 # ============================================
 def main():
-    global trades_today, last_trade_date, last_signal_direction, last_signal_time
+    global last_signal_direction, last_signal_time
 
     print("🚀 XAUBOTTY Starting...")
     print(f"Location: Philippines (PHT / UTC+8)")
     print(f"Capital: ${CAPITAL:.2f} | Leverage: 1:{LEVERAGE} | Lot: {FIXED_LOT}")
-    print(f"Dual Paper Mode: [Setup A: Institutional 1:2] vs [Setup B: Quick Scalp $10 SL / $3 TP]")
+    print(f"Triple Paper Mode: [Setup A (3/day)] vs [Setup B (3/day)] vs [Setup C (Unlimited)]")
     print(f"Paper mode: {PAPER_MODE} (Strictly No Real Trades)")
 
     # Option 1: Initialize MetaTrader 5 for 100% Free Live Vantage Data
     if USE_MT5:
         init_mt5()
 
+    # Rehydrate persistent local ledger
+    ledger = load_ledger()
+    open_count = len(ledger.get("open_trades", []))
+    closed_count = len(ledger.get("closed_trades", []))
+    print(f"💾 Persistent Ledger Loaded: {open_count} open trades, {closed_count} closed historical trades.")
+
     market_info = get_live_market_info()
     spread_str  = f"${market_info['spread']:.2f} ({int(market_info['spread']*10)} pips)" if market_info["spread"] is not None else "Free API Feed"
 
+    acc_a = ledger["accounts"]["setup_a"]
+    acc_b = ledger["accounts"]["setup_b"]
+    acc_c = ledger["accounts"]["setup_c"]
+
     send_telegram(
         f"🚀 <b>XAUBOTTY LIVE IN PHILIPPINES 🇵🇭</b>\n\n"
-        f"🧪 <b>DUAL PAPER TESTING ACTIVE (OPTION 1)</b>\n\n"
+        f"🧪 <b>TRIPLE PAPER TESTING ACTIVE (OPTION 1)</b>\n\n"
         f"🏛️ <b>Feed:</b> {market_info['source']}\n"
         f"📏 <b>Live Spread:</b> {spread_str}\n"
-        f"💼 <b>Account:</b> ${CAPITAL:.2f} Fund | 1:{LEVERAGE} Leverage\n"
+        f"💼 <b>Starting Fund:</b> ${CAPITAL:.2f} | 1:{LEVERAGE} Leverage\n"
         f"📦 <b>Size:</b> {FIXED_LOT} Micro Lot (Fixed)\n"
         f"🕒 <b>Session:</b> {get_session()}\n\n"
-        f"📊 <b>Testing 2 Modes Simultaneously:</b>\n"
-        f"  🔹 <b>Setup A:</b> Institutional SMC (1:2 R:R)\n"
-        f"  🔸 <b>Setup B:</b> Quick Scalp ($10 SL / $3 TP)\n\n"
+        f"📊 <b>Testing 3 Accounts Simultaneously:</b>\n"
+        f"  🔹 <b>Setup A:</b> Institutional SMC 1:2 (Max 3/day) | Bal: ${acc_a['balance']:.2f}\n"
+        f"  🔸 <b>Setup B:</b> Quick Scalp $10 SL / $3 TP (Max 3/day) | Bal: ${acc_b['balance']:.2f}\n"
+        f"  ⚡ <b>Setup C:</b> Unlimited SMC (No Daily Limit) | Bal: ${acc_c['balance']:.2f}\n\n"
+        f"💾 <i>Persistent Ledger: Active in local storage ({open_count} rehydrated open trades)</i>\n"
         f"Scanning on 5-Minute Candle Closes ⚔️"
     )
 
+    last_day_announced = None
+
     while True:
         try:
-            now   = datetime.now(PHT)
-            today = now.date()
+            now       = datetime.now(PHT)
+            today_str = now.strftime('%Y-%m-%d')
 
-            if last_trade_date != today:
-                trades_today = 0
-                last_trade_date = today
+            # Ensure accounts reset their daily counters at Philippine midnight
+            check_daily_reset(ledger, today_str)
+
+            if last_day_announced != today_str:
+                last_day_announced    = today_str
                 last_signal_direction = None
-                print(f"\n📅 New day in Philippines: {today}")
-                send_telegram(f"📅 <b>New Trading Day: {today} (PHT)</b>\nSignals remaining: {MAX_TRADES_PER_DAY}")
+                print(f"\n📅 New trading day in Philippines: {today_str}")
+                send_telegram(f"📅 <b>New Trading Day: {today_str} (PHT)</b>\nSetups A & B reset to 3 signals. Setup C running UNLIMITED ⚡")
 
             session = get_session()
-            print(f"\n[{now.strftime('%I:%M %p PHT')}] {session} | Signals: {trades_today}/{MAX_TRADES_PER_DAY}")
+            acc_a = ledger["accounts"]["setup_a"]
+            acc_b = ledger["accounts"]["setup_b"]
+            acc_c = ledger["accounts"]["setup_c"]
 
-            if trades_today >= MAX_TRADES_PER_DAY:
-                print("Daily limit reached (3/3). Sleeping 1hr...")
-                time.sleep(3600)
-                continue
+            print(f"\n[{now.strftime('%I:%M %p PHT')}] {session} | Trades Today: A({acc_a['trades_today']}/3), B({acc_b['trades_today']}/3), C({acc_c['trades_today']} Unlimited)")
 
             if now.weekday() >= 5: # Saturday/Sunday
                 print("Weekend — Gold market closed. Sleeping 1hr...")
@@ -895,9 +1127,8 @@ def main():
                 time.sleep(120)
                 continue
 
-            # Check open paper trades against the latest candle
-            if active_paper_trades:
-                evaluate_open_paper_trades(candles_5m[-1])
+            # Check open paper trades from persistent ledger against the latest candle
+            evaluate_open_paper_trades(candles_5m[-1])
 
             # Generate new signal
             sig = generate_signal(candles_5m, candles_15m)
@@ -909,15 +1140,8 @@ def main():
                     print("Same direction within 45min — skipping repeat entry.")
                 else:
                     send_signal(sig)
-                    trades_today         += 1
-                    last_signal_time      = now_ts
                     last_signal_direction = sig["signal"]
-                    if trades_today >= MAX_TRADES_PER_DAY:
-                        send_telegram(
-                            f"🔴 <b>Daily Limit Reached</b>\n"
-                            f"{MAX_TRADES_PER_DAY}/{MAX_TRADES_PER_DAY} signals sent.\n"
-                            f"Resuming tomorrow."
-                        )
+                    last_signal_time      = now_ts
             else:
                 print("No signal on this candle. Waiting for next close...")
 

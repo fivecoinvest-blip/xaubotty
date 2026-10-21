@@ -220,3 +220,5 @@ __marimo__/
 # Local runtime files & trade logs
 paper_trades_history.json
 *.log
+
+data/
