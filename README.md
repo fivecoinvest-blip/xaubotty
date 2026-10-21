@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.9+-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Telegram API](https://img.shields.io/badge/Telegram-API-0088CC?style=for-the-badge&logo=telegram&logoColor=white)](https://core.telegram.org/bots)
-[![TwelveData](https://img.shields.io/badge/TwelveData-Market_Data-FF4B4B?style=for-the-badge)](https://twelvedata.com/)
+[![MetaTrader 5](https://img.shields.io/badge/MetaTrader_5-Direct_Broker_Feed-2D72D9?style=for-the-badge)](https://www.metatrader5.com/)
 [![Railway](https://img.shields.io/badge/Railway-Deploy-0B0D0E?style=for-the-badge&logo=railway&logoColor=white)](https://railway.app/)
 
 *An institutional-grade algorithmic trading bot engineered specifically for Gold (XAU/USD). Utilizes Smart Money Concepts (SMC) including Market Structure, Liquidity Grabs, and Fair Value Gaps (FVG) to dispatch high-probability trade setups directly to Telegram.*
@@ -59,7 +59,7 @@ The bot scores potential trade setups out of 100 based on multiple confluences:
 ### Prerequisites
 - Python 3.9+
 - A Telegram Bot Token (from [@BotFather](https://t.me/botfather))
-- A TwelveData API Key (for real-time XAU/USD data)
+- MetaTrader 5 (for 100% free live XAU/USD broker data & spreads)
 
 ### Local Installation
 
@@ -99,7 +99,7 @@ To keep your credentials secure, do **not** hardcode them. Export these environm
 |---|---|
 | `TELEGRAM_TOKEN` | The HTTP API token from BotFather. |
 | `TELEGRAM_CHAT_ID` | Your personal ID or Channel ID where signals will be sent. |
-| `TWELVEDATA_API_KEY` | Free API key from TwelveData to pull candlestick data. |
+
 
 ---
 

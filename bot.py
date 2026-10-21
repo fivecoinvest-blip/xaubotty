@@ -28,17 +28,14 @@ except ImportError:
 # ============================================
 TELEGRAM_TOKEN     = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
-TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY")
 
-SYMBOL       = "XAU/USD"
-MT5_SYMBOL   = "XAUUSD"
-CAPITAL      = 40.0             # Exact user account fund
-LEVERAGE     = 500              # Vantage 1:500 high leverage
-FIXED_LOT    = 0.01             # Micro lot (1 oz gold)
+MT5_SYMBOL         = "XAUUSD"
+CAPITAL            = 40.0             # Exact user account fund
+LEVERAGE           = 500              # Vantage 1:500 high leverage
+FIXED_LOT          = 0.01             # Micro lot (1 oz gold)
 
-# Data Provider Configuration (Option 1: MetaTrader 5 Free Direct Feed)
-USE_MT5         = True
-MT5_INITIALIZED = False
+# Data Provider Configuration (MetaTrader 5 Direct Free Broker Feed)
+MT5_INITIALIZED    = False
 
 MAX_TRADES_PER_DAY = 3
 MIN_CONFIDENCE     = 65
@@ -169,17 +166,17 @@ def send_telegram(message):
         print(f"Telegram error: {e}")
 
 # ============================================
-# METATRADER 5 & LIVE MARKET DATA (OPTION 1)
+# METATRADER 5 DEDICATED LIVE MARKET DATA
 # ============================================
 def init_mt5():
     """Initializes MetaTrader 5 connection to fetch 100% free live broker candles & spreads."""
     global MT5_INITIALIZED, MT5_SYMBOL
     if not MT5_AVAILABLE:
-        print("MetaTrader5 library not available. Falling back to TwelveData.")
+        print("❌ MetaTrader5 library not found. Please install: pip install MetaTrader5")
         return False
     try:
         if not mt5.initialize():
-            print(f"MetaTrader5 initialize failed: {mt5.last_error()}. Using TwelveData fallback.")
+            print(f"❌ MetaTrader 5 initialize failed: {mt5.last_error()}. Make sure MetaTrader 5 is running.")
             return False
 
         # Detect the exact Gold symbol available on the broker
@@ -201,14 +198,14 @@ def init_mt5():
 
 
 def get_live_market_info():
-    """Returns real-time bid, ask, and spread from MT5, or TwelveData indicator."""
-    if USE_MT5 and MT5_INITIALIZED:
+    """Returns real-time bid, ask, and spread from MT5."""
+    if MT5_INITIALIZED:
         try:
             tick = mt5.symbol_info_tick(MT5_SYMBOL)
             if tick:
                 spread = round(tick.ask - tick.bid, 2)
                 return {
-                    "source": "MetaTrader 5 (Live Free)",
+                    "source": "MetaTrader 5 (Vantage Direct)",
                     "bid": tick.bid,
                     "ask": tick.ask,
                     "spread": spread
@@ -216,7 +213,7 @@ def get_live_market_info():
         except Exception:
             pass
     return {
-        "source": "TwelveData",
+        "source": "MetaTrader 5 (Connecting...)",
         "bid": None,
         "ask": None,
         "spread": None
@@ -225,55 +222,32 @@ def get_live_market_info():
 
 def get_candles(interval="5min", outputsize=100):
     """
-    Fetches candles with Option 1: MetaTrader 5 (Free, 0 delay, exact broker price).
-    Falls back to TwelveData if MT5 is closed.
+    Fetches candles directly from MetaTrader 5 (100% free, 0 delay, exact broker price).
+    Zero third-party API dependencies.
     """
     global MT5_INITIALIZED
+    if not MT5_INITIALIZED:
+        init_mt5()
+    if not MT5_INITIALIZED:
+        print("MetaTrader 5 not connected. Please ensure your MetaTrader 5 terminal is open.")
+        return None
 
-    # 1. Option 1: MetaTrader 5 Direct Broker Feed (100% Free)
-    if USE_MT5:
-        if not MT5_INITIALIZED:
-            init_mt5()
-        if MT5_INITIALIZED:
-            tf = mt5.TIMEFRAME_M5 if interval == "5min" else (mt5.TIMEFRAME_M15 if interval == "15min" else mt5.TIMEFRAME_H1)
-            rates = mt5.copy_rates_from_pos(MT5_SYMBOL, tf, 0, outputsize)
-            if rates is not None and len(rates) > 0:
-                candles = []
-                for r in rates:
-                    candles.append({
-                        "time": datetime.fromtimestamp(r["time"]).strftime("%Y-%m-%d %H:%M:%S"),
-                        "open": float(r["open"]),
-                        "high": float(r["high"]),
-                        "low": float(r["low"]),
-                        "close": float(r["close"]),
-                        "volume": float(r["tick_volume"])
-                    })
-                return candles
-            else:
-                print(f"MT5 rates unavailable for {interval}. Falling back to TwelveData...")
-
-    # 2. Fallback: TwelveData API (Free Tier)
-    url    = "https://api.twelvedata.com/time_series"
-    params = {
-        "symbol": SYMBOL, "interval": interval,
-        "outputsize": outputsize, "apikey": TWELVEDATA_API_KEY, "format": "JSON"
-    }
-    try:
-        r    = requests.get(url, params=params, timeout=15)
-        data = r.json()
-        if "values" not in data:
-            print(f"API Error: {data}")
-            return None
+    tf = mt5.TIMEFRAME_M5 if interval == "5min" else (mt5.TIMEFRAME_M15 if interval == "15min" else mt5.TIMEFRAME_H1)
+    rates = mt5.copy_rates_from_pos(MT5_SYMBOL, tf, 0, outputsize)
+    if rates is not None and len(rates) > 0:
         candles = []
-        for c in reversed(data["values"]):
+        for r in rates:
             candles.append({
-                "time": c["datetime"], "open": float(c["open"]),
-                "high": float(c["high"]), "low": float(c["low"]),
-                "close": float(c["close"])
+                "time": datetime.fromtimestamp(r["time"]).strftime("%Y-%m-%d %H:%M:%S"),
+                "open": float(r["open"]),
+                "high": float(r["high"]),
+                "low": float(r["low"]),
+                "close": float(r["close"]),
+                "volume": float(r["tick_volume"])
             })
         return candles
-    except Exception as e:
-        print(f"Candle fetch error: {e}")
+    else:
+        print(f"MT5 rates unavailable for {interval}: {mt5.last_error()}")
         return None
 
 # ============================================
@@ -1055,9 +1029,8 @@ def main():
     print(f"Triple Paper Mode: [Setup A (3/day)] vs [Setup B (3/day)] vs [Setup C (Unlimited)]")
     print(f"Paper mode: {PAPER_MODE} (Strictly No Real Trades)")
 
-    # Option 1: Initialize MetaTrader 5 for 100% Free Live Vantage Data
-    if USE_MT5:
-        init_mt5()
+    # Initialize MetaTrader 5 for 100% Free Live Vantage Data
+    init_mt5()
 
     # Rehydrate persistent local ledger
     ledger = load_ledger()
@@ -1066,7 +1039,7 @@ def main():
     print(f"💾 Persistent Ledger Loaded: {open_count} open trades, {closed_count} closed historical trades.")
 
     market_info = get_live_market_info()
-    spread_str  = f"${market_info['spread']:.2f} ({int(market_info['spread']*10)} pips)" if market_info["spread"] is not None else "Free API Feed"
+    spread_str  = f"${market_info['spread']:.2f} ({int(market_info['spread']*10)} pips)" if market_info["spread"] is not None else "Connecting..."
 
     acc_a = ledger["accounts"]["setup_a"]
     acc_b = ledger["accounts"]["setup_b"]
@@ -1074,8 +1047,8 @@ def main():
 
     send_telegram(
         f"🚀 <b>XAUBOTTY LIVE IN PHILIPPINES 🇵🇭</b>\n\n"
-        f"🧪 <b>TRIPLE PAPER TESTING ACTIVE (OPTION 1)</b>\n\n"
-        f"🏛️ <b>Feed:</b> {market_info['source']}\n"
+        f"🧪 <b>TRIPLE PAPER TESTING ACTIVE (METATRADER 5)</b>\n\n"
+        f"🏛️ <b>Data Feed:</b> {market_info['source']}\n"
         f"📏 <b>Live Spread:</b> {spread_str}\n"
         f"💼 <b>Starting Fund:</b> ${CAPITAL:.2f} | 1:{LEVERAGE} Leverage\n"
         f"📦 <b>Size:</b> {FIXED_LOT} Micro Lot (Fixed)\n"
@@ -1116,8 +1089,7 @@ def main():
                 time.sleep(3600)
                 continue
 
-            feed_name = "MetaTrader 5 (Option 1: Free)" if MT5_INITIALIZED else "TwelveData"
-            print(f"Fetching candles from {feed_name}...")
+            print("Fetching live candles from MetaTrader 5...")
             candles_5m = get_candles("5min", 100)
             time.sleep(1)
             candles_15m = get_candles("15min", 100)

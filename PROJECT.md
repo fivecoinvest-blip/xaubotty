@@ -5,8 +5,7 @@
 
 ## 2. Stack
 * **Language**: Python 3.11+
-* **Primary Market Data**: MetaTrader 5 (Option 1: 100% Free Live Direct Broker Feed, zero latency, live bid/ask/spread)
-* **Secondary Fallback**: TwelveData REST API (`XAU/USD`)
+* **Primary Market Data**: MetaTrader 5 (100% Free Live Direct Broker Feed, zero latency, live bid/ask/spread, zero API keys)
 * **Alert Delivery**: Telegram Bot API (`sendMessage` with HTML formatting)
 * **Execution Engine**: Dual Paper Mode (Zero real capital risk, paper tracking only)
 
