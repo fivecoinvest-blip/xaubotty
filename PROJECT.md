@@ -10,11 +10,21 @@
 * **Deployment**: Railway / Heroku / Local runner via `Procfile` / `railway.json`
 
 ## 3. Status
-* **Status**: Local folder renamed to `projects/xaubotty/`
-* **Target Repository**: `https://github.com/fivecoinvest-blip/xaubotty`
-* **Cleaned**: Removed all upstream fork references, foreign authors, and Codebuff attribution.
+* **Status**: Fully calibrated for Philippines (PHT, UTC+8) and $40.00 fund with 1:500 leverage on Vantage.
+* **Target Repository**: `https://github.com/fivecoinvest-blip/xaubotty` (Clean commit history, zero forks).
+* **Execution**: Dual Paper Mode running simultaneously on 5-minute candle closes with automatic TP/SL outcome resolution alerts.
 
-## 4. Key Decisions
-* **Independent Ownership**: Rebuilt with clean Git history directly under `fivecoinvest-blip`.
-* **Zero Hardcoded Secrets**: Uses environment variables (`TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `TWELVEDATA_API_KEY`) via `.env.example`.
-* **Capital Protection**: Dynamic lot sizing and maximum daily trade limits (default: 3 trades/day, 5% max risk).
+## 4. Key Decisions & Mathematical Calibration
+* **Independent Ownership**: Clean Git history under `fivecoinvest-blip/xaubotty`.
+* **Zero Hardcoded Secrets**: Strictly local `.env` (gitignored); never committed to repository.
+* **Capital Sizing ($40 Fund @ 1:500 Leverage)**:
+  * Margin requirement per 0.01 micro lot = ~$8.26 (20.6% of account).
+  * Free margin = $31.74. Vantage 50% liquidation level = $4.13.
+  * Gold liquidation cushion = $35.87 adverse move.
+  * Fixed micro lot size (0.01) replaces old dynamic lot calculation that failed under $40 accounts.
+* **Dual Paper Mode**:
+  * **Setup A [Institutional SMC 1:2 R:R]**: Dynamic SL based on order blocks/swing levels (capped at $10 max), TP = 2x SL. Breakeven win rate: 33.3%.
+  * **Setup B [Quick Scalp]**: Fixed $10.00 SL, $3.00 TP. Breakeven win rate: 76.9%.
+* **Automated Outcome Engine**:
+  * Evaluates open trades against incoming 5M candle highs/lows.
+  * Dispatches victory/loss alerts to Telegram and logs to `paper_trades_history.json`.
