@@ -38,7 +38,7 @@ FIXED_LOT          = 0.01             # Micro lot (1 oz gold)
 MT5_INITIALIZED    = False
 
 MAX_TRADES_PER_DAY = 3
-MIN_CONFIDENCE     = 65
+MIN_CONFIDENCE     = 70
 MIN_SL_DOLLARS     = 2.50
 MAX_SL_DOLLARS     = 10.0           # Max stop loss cap ($10 on $40 fund)
 MIN_FVG_SIZE       = 1.50           # Minimum FVG gap in dollars
@@ -71,7 +71,7 @@ DEFAULT_LEDGER = {
             "last_trade_date": None
         },
         "setup_b": {
-            "name": "Disciplined Quick Scalp ($10 SL / $3 TP)",
+            "name": "Disciplined Sniper Precision (1:1.5 R:R)",
             "badge": "🔸 Setup B",
             "rule": "Disciplined (Max 3/day)",
             "initial_balance": CAPITAL,
@@ -262,7 +262,7 @@ def send_balance_summary():
 🔹 <b>[SETUP A] INSTITUTIONAL SMC (1:2)</b>
 {fmt_acc('setup_a')}
 
-🔸 <b>[SETUP B] QUICK SCALP ($10 SL / $3 TP)</b>
+🔸 <b>[SETUP B] SNIPER PRECISION (1:1.5 R:R)</b>
 {fmt_acc('setup_b')}
 
 ⚡ <b>[SETUP C] UNLIMITED SMC (NO LIMIT)</b>
@@ -784,9 +784,9 @@ def generate_signal(candles_5m, candles_15m):
     sl_dollars_a = min(round(sl_dollars_raw, 2), MAX_SL_DOLLARS)
     tp_dollars_a = round(sl_dollars_a * 2.0, 2)
 
-    # Profile B: User's Quick Scalp ($10 SL / $3 TP test)
-    sl_dollars_b = 10.00
-    tp_dollars_b = 3.00
+    # Profile B: Dynamic Sniper Precision (1:1.5 R:R, tight SL cap <= $6.00)
+    sl_dollars_b = min(sl_dollars_a, 6.00)
+    tp_dollars_b = round(sl_dollars_b * 1.5, 2)
 
     if signal == "LONG":
         sl_price_a = round(curr_price - sl_dollars_a, 2)
@@ -826,15 +826,15 @@ def generate_signal(candles_5m, candles_15m):
             "max_risk_usd": sl_dollars_a,
             "target_win_usd": tp_dollars_a,
         },
-        # Profile B (Quick Scalp User Test)
+        # Profile B (Dynamic Sniper Precision 1:1.5 R:R)
         "setup_b": {
-            "name": "Quick Scalp ($10 SL / $3 TP)",
+            "name": "Sniper Precision (1:1.5 R:R)",
             "sl_dollars": sl_dollars_b,
             "tp_dollars": tp_dollars_b,
             "sl_price": sl_price_b,
             "tp_price": tp_price_b,
-            "rr": "1:0.3",
-            "be_winrate": "76.9%",
+            "rr": "1:1.5",
+            "be_winrate": "40.0%",
             "max_risk_usd": sl_dollars_b,
             "target_win_usd": tp_dollars_b,
         },
@@ -918,7 +918,7 @@ def send_signal(sig):
 ⚖️ <b>R:R:</b> {sa["rr"]} | <b>Status:</b> {status_a}
 💰 <b>Balance:</b> ${acc_a['balance']:.2f}
 
-🔸 <b>[SETUP B] QUICK SCALP TEST ($10 SL / $3 TP)</b>
+🔸 <b>[SETUP B] SNIPER PRECISION (1:1.5 R:R)</b>
 🛑 <b>Stop Loss:</b> {sb["sl_price"]:.2f} (-${sb["max_risk_usd"]:.2f})
 🎯 <b>Take Profit:</b> {sb["tp_price"]:.2f} (+${sb["target_win_usd"]:.2f})
 ⚖️ <b>R:R:</b> {sb["rr"]} | <b>Status:</b> {status_b}
@@ -1025,26 +1025,26 @@ def evaluate_open_paper_trades(current_candle):
                 else:
                     accounts["setup_a"]["losses"] += 1
 
-        # 2. Setup B
+        # 2. Setup B (Sniper Precision 1:1.5 R:R)
         sb = trade["setup_b"]
         if sb["active"] and sb["status"] == "OPEN":
             if trade["signal"] == "LONG":
                 if high >= sb["tp"]:
                     sb["status"] = "TAKE_PROFIT_HIT"
-                    sb["pnl"] = 3.00
+                    sb["pnl"] = round(sb["tp"] - trade["entry"], 2)
                     trade_resolved = True
                 elif low <= sb["sl"]:
                     sb["status"] = "STOP_LOSS_HIT"
-                    sb["pnl"] = -10.00
+                    sb["pnl"] = -round(trade["entry"] - sb["sl"], 2)
                     trade_resolved = True
             else: # SHORT
                 if low <= sb["tp"]:
                     sb["status"] = "TAKE_PROFIT_HIT"
-                    sb["pnl"] = 3.00
+                    sb["pnl"] = round(trade["entry"] - sb["tp"], 2)
                     trade_resolved = True
                 elif high >= sb["sl"]:
                     sb["status"] = "STOP_LOSS_HIT"
-                    sb["pnl"] = -10.00
+                    sb["pnl"] = -round(sb["sl"] - trade["entry"], 2)
                     trade_resolved = True
 
             if sb["status"] != "OPEN":
@@ -1121,7 +1121,7 @@ def evaluate_open_paper_trades(current_candle):
 🔹 <b>[Setup A - Disciplined 3/day]:</b> {trade['setup_a']['status']} (P/L: ${trade['setup_a']['pnl']:+.2f})
    💰 <b>Account:</b> {fmt_stats('setup_a')}
 
-🔸 <b>[Setup B - Quick Scalp 3/day]:</b> {trade['setup_b']['status']} (P/L: ${trade['setup_b']['pnl']:+.2f})
+🔸 <b>[Setup B - Sniper 1:1.5 (3/day)]:</b> {trade['setup_b']['status']} (P/L: ${trade['setup_b']['pnl']:+.2f})
    💰 <b>Account:</b> {fmt_stats('setup_b')}
 
 ⚡ <b>[Setup C - Unlimited SMC]:</b> {trade['setup_c']['status']} (P/L: ${trade['setup_c']['pnl']:+.2f})
@@ -1185,7 +1185,7 @@ def main():
         f"🕒 <b>Session:</b> {get_session()}\n\n"
         f"📊 <b>Testing 3 Accounts Simultaneously:</b>\n"
         f"  🔹 <b>Setup A:</b> Institutional SMC 1:2 (Max 3/day) | Bal: ${acc_a['balance']:.2f}\n"
-        f"  🔸 <b>Setup B:</b> Quick Scalp $10 SL / $3 TP (Max 3/day) | Bal: ${acc_b['balance']:.2f}\n"
+        f"  🔸 <b>Setup B:</b> Sniper Precision 1:1.5 (Max 3/day) | Bal: ${acc_b['balance']:.2f}\n"
         f"  ⚡ <b>Setup C:</b> Unlimited SMC (No Daily Limit) | Bal: ${acc_c['balance']:.2f}\n\n"
         f"💾 <i>Persistent Ledger: Active in local storage ({open_count} rehydrated open trades)</i>\n"
         f"Scanning on 5-Minute Candle Closes ⚔️"

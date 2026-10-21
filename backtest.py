@@ -116,7 +116,7 @@ class AccountSim:
         })
 
 acc_a = AccountSim("Setup A (Institutional 1:2 R:R - Max 3/day)", max_daily=3)
-acc_b = AccountSim("Setup B (Quick Scalp $10 SL / $3 TP - Max 3/day)", max_daily=3)
+acc_b = AccountSim("Setup B (Sniper Precision 1:1.5 R:R - Max 3/day)", max_daily=3)
 acc_c = AccountSim("Setup C (Unlimited SMC 1:2 - No Daily Limit)", is_unlimited=True)
 
 # 2. Walk-Forward Simulation Loop
@@ -208,18 +208,18 @@ while i < total_bars - 20:
                         if not a_done: pnl_a = res_pnl; dur_a = mins; a_done = True
                         if not c_done: pnl_c = res_pnl; dur_c = mins; c_done = True
 
-            # Setup B ($10 SL / $3 TP Quick Scalp)
+            # Setup B (Dynamic Sniper Precision 1:1.5 R:R)
             if not b_done:
                 if direction == "LONG":
                     if h >= sb["tp_price"]:
-                        pnl_b = 3.00; dur_b = mins; b_done = True
+                        pnl_b = sb["tp_price"] - entry_price; dur_b = mins; b_done = True
                     elif l <= sb["sl_price"]:
-                        pnl_b = -10.00; dur_b = mins; b_done = True
+                        pnl_b = -(entry_price - sb["sl_price"]); dur_b = mins; b_done = True
                 else: # SHORT
                     if l <= sb["tp_price"]:
-                        pnl_b = 3.00; dur_b = mins; b_done = True
+                        pnl_b = entry_price - sb["tp_price"]; dur_b = mins; b_done = True
                     elif h >= sb["sl_price"]:
-                        pnl_b = -10.00; dur_b = mins; b_done = True
+                        pnl_b = -(sb["sl_price"] - entry_price); dur_b = mins; b_done = True
 
             if a_done and b_done and c_done:
                 break
