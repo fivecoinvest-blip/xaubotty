@@ -4,6 +4,12 @@ import time
 from datetime import datetime, date
 import pytz
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
+except ImportError:
+    pass
+
 # ============================================
 # CONFIGURATION
 # ============================================
