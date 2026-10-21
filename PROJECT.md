@@ -1,7 +1,7 @@
-# PROJECT.md — XAU/USD Signal Bot
+# PROJECT.md — Xaubotty
 
 ## 1. Goal
-An institutional-grade algorithmic trading signal bot engineered specifically for Gold (XAU/USD) using Smart Money Concepts (SMC), Market Structure (BOS / CHoCH), Liquidity Sweeps, and Fair Value Gaps (FVG) to dispatch high-probability trade setups directly to Telegram.
+**Xaubotty** is an institutional-grade algorithmic trading signal bot engineered specifically for Gold (XAU/USD) using Smart Money Concepts (SMC), Market Structure (BOS / CHoCH), Liquidity Sweeps, and Fair Value Gaps (FVG) to dispatch high-probability trade setups directly to Telegram.
 
 ## 2. Stack
 * **Language**: Python 3.9+
@@ -10,8 +10,8 @@ An institutional-grade algorithmic trading signal bot engineered specifically fo
 * **Deployment**: Railway / Heroku / Local runner via `Procfile` / `railway.json`
 
 ## 3. Status
-* **Status**: Clean Standalone Project initialized
-* **Repository**: `https://github.com/fivecoinvest-blip/XAU-USD-Signal-Bot`
+* **Status**: Local folder renamed to `projects/xaubotty/`
+* **Target Repository**: `https://github.com/fivecoinvest-blip/xaubotty`
 * **Cleaned**: Removed all upstream fork references, foreign authors, and Codebuff attribution.
 
 ## 4. Key Decisions

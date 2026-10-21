@@ -65,8 +65,8 @@ The bot scores potential trade setups out of 100 based on multiple confluences:
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/fivecoinvest-blip/XAU-USD-Signal-Bot.git
-   cd XAU-USD-Signal-Bot
+   git clone https://github.com/fivecoinvest-blip/xaubotty.git
+   cd xaubotty
    ```
 
 2. **Install dependencies:**
