@@ -220,6 +220,136 @@ def get_live_market_info():
     }
 
 
+# ============================================
+# INTERACTIVE TELEGRAM COMMAND LISTENER
+# ============================================
+last_update_id = 0
+
+
+def send_price_update():
+    market_info = get_live_market_info()
+    now_pht = datetime.now(PHT).strftime('%d %b %Y %I:%M:%S %p PHT')
+    if market_info["bid"] is not None:
+        spread = market_info["spread"]
+        msg = f"""💰 <b>XAU/USD LIVE PRICE</b> 🏛️
+━━━━━━━━━━━━━━━━━━━━
+🟢 <b>Bid:</b> {market_info['bid']:.2f}
+🔴 <b>Ask:</b> {market_info['ask']:.2f}
+📏 <b>Spread:</b> ${spread:.2f} ({int(spread * 10)} pips)
+🕒 <b>Time:</b> {now_pht}
+🌏 <b>Session:</b> {get_session()}
+🏛️ <b>Data Feed:</b> {market_info['source']}
+━━━━━━━━━━━━━━━━━━━━
+<i>Synced live directly from MetaTrader 5 (0-delay).</i>"""
+    else:
+        msg = "⚠️ MetaTrader 5 not connected. Please make sure MetaTrader 5 is running."
+    send_telegram(msg)
+
+
+def send_balance_summary():
+    ledger = load_ledger()
+    accounts = ledger.get("accounts", {})
+    open_trades = ledger.get("open_trades", [])
+
+    def fmt_acc(acc_key):
+        acc = accounts.get(acc_key, {})
+        tot = acc.get("wins", 0) + acc.get("losses", 0)
+        wr = round((acc.get("wins", 0) / tot * 100), 1) if tot > 0 else 0.0
+        return f"💰 <b>Balance:</b> ${acc.get('balance', 40.0):.2f}\n📈 <b>Total P/L:</b> ${acc.get('total_pnl', 0.0):+.2f}\n🎯 <b>Win Rate:</b> {wr}% ({acc.get('wins', 0)}W - {acc.get('losses', 0)}L)\n📊 <b>Trades Today:</b> {acc.get('trades_today', 0)}"
+
+    msg = f"""📊 <b>XAUBOTTY PAPER LEDGER</b> 💾
+━━━━━━━━━━━━━━━━━━━━
+🔹 <b>[SETUP A] INSTITUTIONAL SMC (1:2)</b>
+{fmt_acc('setup_a')}
+
+🔸 <b>[SETUP B] QUICK SCALP ($10 SL / $3 TP)</b>
+{fmt_acc('setup_b')}
+
+⚡ <b>[SETUP C] UNLIMITED SMC (NO LIMIT)</b>
+{fmt_acc('setup_c')}
+━━━━━━━━━━━━━━━━━━━━
+📂 <b>Open Trades in Progress:</b> {len(open_trades)}
+💾 <i>Persisted to local ledger: projects/xaubotty/data/ledger.json</i>"""
+    send_telegram(msg)
+
+
+def send_status_summary():
+    ledger = load_ledger()
+    accounts = ledger.get("accounts", {})
+    open_trades = ledger.get("open_trades", [])
+    market_info = get_live_market_info()
+    now_pht = datetime.now(PHT).strftime('%d %b %Y %I:%M %p PHT')
+
+    bid_str = f"{market_info['bid']:.2f}" if market_info["bid"] is not None else "N/A"
+    ask_str = f"{market_info['ask']:.2f}" if market_info["ask"] is not None else "N/A"
+
+    msg = f"""⚡ <b>XAUBOTTY SYSTEM STATUS</b>
+━━━━━━━━━━━━━━━━━━━━
+🟢 <b>Status:</b> Active & Scanning
+🏛️ <b>Data Feed:</b> {market_info['source']}
+💰 <b>Current Price:</b> {bid_str} / {ask_str}
+🕒 <b>Time:</b> {now_pht}
+🌏 <b>Session:</b> {get_session()}
+💼 <b>Fund / Leverage:</b> ${CAPITAL:.2f} | 1:{LEVERAGE}
+📦 <b>Micro Lot:</b> {FIXED_LOT}
+📂 <b>Active Paper Trades:</b> {len(open_trades)}
+━━━━━━━━━━━━━━━━━━━━
+📊 <b>Today's Trades:</b>
+  • Setup A: {accounts.get('setup_a', {}).get('trades_today', 0)}/3
+  • Setup B: {accounts.get('setup_b', {}).get('trades_today', 0)}/3
+  • Setup C: {accounts.get('setup_c', {}).get('trades_today', 0)} (Unlimited)"""
+    send_telegram(msg)
+
+
+def send_help_menu():
+    msg = f"""🤖 <b>XAUBOTTY COMMAND MENU</b>
+━━━━━━━━━━━━━━━━━━━━
+Available commands:
+
+💰 <b>/price</b> — Live XAU/USD Bid, Ask, Spread & Time
+📊 <b>/balance</b> — Account balances, P/L, & win rates
+⚡ <b>/status</b> — System health, active session, & trade counts
+❓ <b>/help</b> — Show this command list
+
+<i>Type any command directly in this chat!</i>"""
+    send_telegram(msg)
+
+
+def poll_telegram_commands():
+    """Non-blocking poll for incoming commands from user."""
+    global last_update_id
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+    params = {"offset": last_update_id + 1, "timeout": 0}
+    try:
+        r = requests.get(url, params=params, timeout=5)
+        data = r.json()
+        if not data.get("ok"):
+            return
+        for update in data.get("result", []):
+            last_update_id = update["update_id"]
+            message = update.get("message")
+            if not message:
+                continue
+            chat_id = str(message.get("chat", {}).get("id"))
+            if chat_id != str(TELEGRAM_CHAT_ID):
+                # Security: Only respond to authorized chat ID
+                continue
+            text = (message.get("text") or "").strip().lower()
+            print(f"📩 Telegram Command Received: {text}")
+            if text in ["/price", "/gold", "/p"]:
+                send_price_update()
+            elif text in ["/balance", "/stats", "/b", "/ledger"]:
+                send_balance_summary()
+            elif text in ["/status", "/s"]:
+                send_status_summary()
+            elif text in ["/help", "/start"]:
+                send_help_menu()
+    except Exception:
+        pass
+
+
 def get_candles(interval="5min", outputsize=100):
     """
     Fetches candles directly from MetaTrader 5 (100% free, 0 delay, exact broker price).
@@ -1117,11 +1247,15 @@ def main():
             else:
                 print("No signal on this candle. Waiting for next close...")
 
-            # Clock-sync: sleep until next 5M candle close
+            # Clock-sync: sleep until next 5M candle close while responding to Telegram commands
             ts         = time.time()
             sleep_time = (300 - (ts % 300)) + 3
-            print(f"Sleeping {int(sleep_time)}s until next 5M candle close...")
-            time.sleep(sleep_time)
+            print(f"Sleeping {int(sleep_time)}s until next 5M candle close (listening for Telegram commands)...")
+
+            sleep_end = time.time() + sleep_time
+            while time.time() < sleep_end:
+                poll_telegram_commands()
+                time.sleep(2)
 
         except KeyboardInterrupt:
             send_telegram("🔴 <b>XAUBOTTY stopped.</b>")
