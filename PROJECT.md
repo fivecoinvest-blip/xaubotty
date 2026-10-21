@@ -16,6 +16,7 @@
 
 ## 4. Key Decisions & Mathematical Calibration
 * **Data Provider Choice (Option 1)**: Integrated MetaTrader 5 official Python library for 100% free, unlimited, zero-delay tick and candle feed directly from the user's broker terminal. Completely eliminates the need for any paid TwelveData plan in the long term.
+* **Rejection of External Crypto Proxies (Binance PAXG)**: Benchmark testing revealed a ~$5.76 price basis discrepancy between Binance PAXG/USDT and Vantage XAU/USD spot prices. For tight scalping ($3 TP / $10 SL), this basis gap completely distorts execution. Strict architectural rule: MetaTrader 5 on Vantage is the single, non-negotiable source of truth.
 * **Independent Ownership**: Clean Git history under `fivecoinvest-blip/xaubotty`.
 * **Zero Hardcoded Secrets**: Strictly local `.env` (gitignored); never committed to repository.
 * **Capital Sizing ($40 Fund @ 1:500 Leverage)**:
